@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2017",
+    "module": "commonjs",
+    "esModuleInterop": true,
+    "allowJs": true,
+    "strict": true,
+    "strictNullChecks": true
+  },
+  "ts-node": {
+    "files": true,
+    "transpileOnly": true
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}
