@@ -4,27 +4,19 @@ import { difference as setDifference } from 'set-operations';
 
 import { getFiles } from './getFiles';
 import { OwnershipTree, getOwnershipTree } from './ownership-tree';
-import { getTail, mapsKeysAreSame } from './utils';
+import { mapsKeysAreSame } from './utils';
 
 class Entry {
     private debugInitialOwnership: Map<string, [count: number, key: string]>;
     private internalOwnership: Map<string, [count: number, key: string]>;
-    private looseOwnership: Set<string>;
     ownership: Map<string, [count: number, key: string]>;
     path: string;
     parentEntry?: Entry;
     children: Entry[] = [];
     constructor(tree: OwnershipTree, parentEntry?: Entry) {
         this.internalOwnership = new Map(tree.ownership);
+        this.ownership = new Map(tree.ownership);
         this.debugInitialOwnership = new Map(tree.ownership);
-        this.looseOwnership = new Set(
-            getTail(Array.from(tree.ownership.entries()), 0.5)
-        );
-        this.ownership = new Map(
-            [...this.internalOwnership].filter(
-                ([key]) => !this.looseOwnership.has(key)
-            )
-        );
 
         this.path = tree.path;
         if (parentEntry) {
@@ -44,9 +36,16 @@ class Entry {
             const newCount = currentCount - diffCount;
             if (newCount >= 0) {
                 this.internalOwnership.set(team, [newCount, key]);
-                if (newCount === 0) {
-                    this.ownership.delete(team);
-                }
+                const maxCount =
+                    [...this.internalOwnership]
+                        .map(([, [count]]) => count)
+                        .sort((a, b) => a - b)
+                        .pop() || 0;
+                this.ownership = new Map(
+                    [...this.internalOwnership].filter(
+                        ([, [count]]) => count > 0 && count > maxCount * 0.5
+                    )
+                );
             } else {
                 throw new Error('Impossible');
             }
@@ -95,9 +94,10 @@ class Entry {
                     .sort((a, b) => b[1][0] - a[1][0])
                     .map(([team, [count]]) => {
                         return `#    ${[
-                            this.looseOwnership.has(team) ? 'lossy' : '     ',
                             this.ownership.has(team) ? '        ' : 'narrowed',
-                            `${this.internalOwnership.get(team)![0]}/${count}`.padEnd(10),
+                            `${
+                                this.internalOwnership.get(team)![0]
+                            }/${count}`.padEnd(10),
                             team,
                         ].join(' ')}`;
                     }),
@@ -152,6 +152,14 @@ async function main(outputPath: string) {
 
         for (let [team, [count]] of currentEntry.ownership.entries()) {
             parentEntry?.subtractTeamCount(team, count);
+        }
+
+        // TODO maybe better?
+        if (getBudget(entries) > MAX_BUDGET) {
+            for (let [team, [count]] of currentEntry.ownership.entries()) {
+                parentEntry?.subtractTeamCount(team, -count);
+            }
+            break
         }
 
         if (currentEntry.hasVaryOwnership()) {

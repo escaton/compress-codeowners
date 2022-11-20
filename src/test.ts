@@ -40,10 +40,12 @@ const main = async (testCodeownersPath: string) => {
         const originalOwnership = originalOwnershipTree
             .getFileOwnership('/' + file)
             .map(([team]) => team)
+            .filter((team) => team !== 'none')
             .sort();
         const testOwnership = testOwnershipTree
             .getFileOwnership('/' + file)
             .map(([team]) => team)
+            .filter((team) => team !== 'none')
             .sort();
 
         originalOwnership.forEach((team) => {
@@ -80,7 +82,8 @@ const main = async (testCodeownersPath: string) => {
         return (val * 100).toFixed(2) + '%';
     };
 
-    let totalOwnershipChange = 0;
+    let totalOwnershipAdded = 0;
+    let totalOwnershipLost = 0;
     Object.entries(teamsStat)
         .sort(
             ([, a], [, b]) =>
@@ -90,7 +93,11 @@ const main = async (testCodeownersPath: string) => {
         .forEach(([team, { original, test }]) => {
             const sign = test - original > 0 ? '+' : '';
 
-            totalOwnershipChange += Math.abs((test - original) / files.length);
+            if (test < original) {
+                totalOwnershipLost += (test - original) / files.length;
+            } else {
+                totalOwnershipAdded += (test - original) / files.length;
+            }
             table.addRow({
                 team,
                 original: original,
@@ -102,7 +109,8 @@ const main = async (testCodeownersPath: string) => {
     table.printTable();
     console.log(
         'Total ownership change:',
-        formatPercent(totalOwnershipChange)
+        formatPercent(totalOwnershipLost),
+        '+' + formatPercent(totalOwnershipAdded)
     );
 };
 
