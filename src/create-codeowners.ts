@@ -1,17 +1,27 @@
 import fs from 'fs/promises';
 import { PriorityQueue } from '@datastructures-js/priority-queue';
+import { difference as setDifference } from 'set-operations';
 
 import { getFiles } from './getFiles';
 import { OwnershipTree, getOwnershipTree } from './ownership-tree';
-import { mapsKeysAreSame } from './utils';
+import { getTail, mapsKeysAreSame } from './utils';
 
 class Entry {
+    private internalOwnership: Map<string, number>;
+    private looseOwnership: Set<string>;
     ownership: Map<string, number>;
     path: string;
     parentEntry?: Entry;
     children: Entry[] = [];
     constructor(tree: OwnershipTree, parentEntry?: Entry) {
-        this.ownership = new Map(tree.ownership);
+        this.internalOwnership = new Map(tree.ownership);
+        this.looseOwnership = new Set(getTail(tree.ownership, 0.5));
+        this.ownership = new Map(
+            [...this.internalOwnership].filter(
+                ([key]) => !this.looseOwnership.has(key)
+            )
+        );
+
         this.path = tree.path;
         if (parentEntry) {
             this.parentEntry = parentEntry;
@@ -22,16 +32,17 @@ class Entry {
         this.children.push(entry);
     }
     subtractTeamCount(team: string, count: number) {
-        const teamCount = this.ownership.get(team);
+        const teamCount = this.internalOwnership.get(team);
         if (teamCount === undefined) {
             throw new Error('Impossible');
         }
         if (teamCount > 0) {
             const newCount = teamCount - count;
-            if (newCount === 0) {
-                this.ownership.delete(team);
-            } else if (newCount > 0) {
-                this.ownership.set(team, newCount);
+            if (newCount >= 0) {
+                this.internalOwnership.set(team, newCount);
+                if (newCount === 0) {
+                    this.ownership.delete(team);
+                }
             } else {
                 throw new Error('Impossible');
             }

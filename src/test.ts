@@ -1,12 +1,11 @@
-import { parse, find } from '../../client/scripts/lint-codeowners';
+import { Table } from 'console-table-printer';
 import fs from 'fs/promises';
-import glob from 'fast-glob';
-import globToTree, { ITree } from 'glob-tree-list';
-import ProgressBar from 'progress';
+import jsonDiff from 'json-diff';
+
 import { getFiles } from './getFiles';
 import { getOwnershipTree } from './ownership-tree';
 
-const main = async (testCodeownersPath: string) => {
+const prepare = async (testCodeownersPath: string, files: string[]) => {
     const originalCodeownersString = await fs.readFile('../client/CODEOWNERS', {
         encoding: 'utf8',
     });
@@ -14,7 +13,6 @@ const main = async (testCodeownersPath: string) => {
         encoding: 'utf8',
     });
 
-    const files = await getFiles();
     const originalOwnershipTree = await getOwnershipTree(
         files,
         originalCodeownersString,
@@ -26,65 +24,120 @@ const main = async (testCodeownersPath: string) => {
         false
     );
 
-    let GOT_OWNED = 0;
-    let MORE_OWNERS = 0;
-    let DIFFERENT_OWNER = 0;
-    let LESS_OWNERS = 0;
+    return [originalOwnershipTree, testOwnershipTree];
+};
+
+const main = async (testCodeownersPath: string) => {
+    const files = await getFiles();
+    const [originalOwnershipTree, testOwnershipTree] = await prepare(
+        testCodeownersPath,
+        files
+    );
+
+    const teamsStat: Record<string, { original: number; test: number }> = {};
 
     files.forEach((file) => {
         const originalOwnership = originalOwnershipTree
             .getFileOwnership('/' + file)
             .map(([team]) => team)
-            .filter((team) => team !== 'none')
             .sort();
         const testOwnership = testOwnershipTree
             .getFileOwnership('/' + file)
             .map(([team]) => team)
-            .filter((team) => team !== 'none')
             .sort();
 
-        if (originalOwnership.length !== testOwnership.length) {
-            if (originalOwnership.length === 0) {
-                GOT_OWNED++;
-            } else if (originalOwnership.length > testOwnership.length) {
-                LESS_OWNERS++;
-            } else {
-                MORE_OWNERS++;
+        originalOwnership.forEach((team) => {
+            if (!teamsStat[team]) {
+                teamsStat[team] = {
+                    original: 0,
+                    test: 0,
+                };
             }
-        } else if (originalOwnership.join() !== testOwnership.join()) {
-            DIFFERENT_OWNER++;
-            console.log(file, originalOwnership, testOwnership);
-        }
+            teamsStat[team].original++;
+        });
+
+        testOwnership.forEach((team) => {
+            if (!teamsStat[team]) {
+                teamsStat[team] = {
+                    original: 0,
+                    test: 0,
+                };
+            }
+            teamsStat[team].test++;
+        });
     });
 
-    console.table({
-        TOTAL: [files.length, ''],
-        GOT_OWNED: [GOT_OWNED, ((GOT_OWNED / files.length) * 100).toFixed(2)],
-        MORE_OWNERS: [
-            MORE_OWNERS,
-            ((MORE_OWNERS / files.length) * 100).toFixed(2),
-        ],
-        LESS_OWNERS: [
-            LESS_OWNERS,
-            ((LESS_OWNERS / files.length) * 100).toFixed(2),
-        ],
-        DIFFERENT_OWNER: [
-            DIFFERENT_OWNER,
-            ((DIFFERENT_OWNER / files.length) * 100).toFixed(2),
+    const table = new Table({
+        columns: [
+            { name: 'team', alignment: 'left' }, // with alignment and color
+            { name: 'original', alignment: 'right' },
+            { name: 'diff', alignment: 'right' },
+            { name: 'repo', alignment: 'right' },
         ],
     });
 
+    const formatPercent = (val: number) => {
+        return (val * 100).toFixed(2) + '%';
+    };
+
+    let totalOwnershipChange = 0;
+    Object.entries(teamsStat)
+        .sort(
+            ([, a], [, b]) =>
+                Math.abs(b.test - b.original) / files.length -
+                Math.abs(a.test - a.original) / files.length
+        )
+        .forEach(([team, { original, test }]) => {
+            const sign = test - original > 0 ? '+' : '';
+
+            totalOwnershipChange += Math.abs((test - original) / files.length);
+            table.addRow({
+                team,
+                original: original,
+                diff: `${sign}${test - original}`,
+                repo: sign + formatPercent((test - original) / files.length),
+            });
+        });
+
+    table.printTable();
     console.log(
-        `GOT_OWNED ${((GOT_OWNED / files.length) * 100).toFixed(
-            2
-        )}%, MORE_OWNERS ${((MORE_OWNERS / files.length) * 100).toFixed(
-            2
-        )}%, LESS_OWNERS ${((LESS_OWNERS / files.length) * 100).toFixed(
-            2
-        )}%, DIFFERENT_OWNER ${((DIFFERENT_OWNER / files.length) * 100).toFixed(
-            2
-        )}%`
+        'Total ownership change:',
+        formatPercent(totalOwnershipChange)
     );
 };
 
-main(process.argv[2]);
+const testSpecificFile = async (
+    testCodeownersPath: string,
+    specificFile: string
+) => {
+    const [originalOwnershipTree, testOwnershipTree] = await prepare(
+        testCodeownersPath,
+        [specificFile]
+    );
+
+    const originalOwnership = originalOwnershipTree
+        .getFileOwnership('/' + specificFile)
+        .map(([team]) => team)
+        .filter((team) => team !== 'none')
+        .sort();
+    const testOwnership = testOwnershipTree
+        .getFileOwnership('/' + specificFile)
+        .map(([team]) => team)
+        .filter((team) => team !== 'none')
+        .sort();
+
+    const diff = jsonDiff.diffString(originalOwnership, testOwnership);
+    if (diff.length > 0) {
+        console.log(diff);
+    } else {
+        console.log("Ownership hasn't changed!");
+    }
+};
+
+const [, , testCodeownersPath, specificFile] = process.argv;
+
+if (specificFile) {
+    testSpecificFile(testCodeownersPath, specificFile);
+} else {
+    main(testCodeownersPath);
+}

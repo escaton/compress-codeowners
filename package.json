@@ -11,13 +11,18 @@
   "dependencies": {
     "@datastructures-js/priority-queue": "^6.1.4",
     "@types/graphviz": "^0.0.34",
+    "@types/json-diff": "^0.9.1",
     "@types/node": "^18.11.9",
     "@types/progress": "^2.0.5",
+    "console-table-printer": "^2.11.1",
+    "crc": "^4.1.1",
     "fast-glob": "^3.2.12",
     "glob-tree-list": "^2.0.2",
     "graphviz": "^0.0.9",
+    "json-diff": "^1.0.0",
     "progress": "^2.0.3",
     "render-dot": "^0.0.7",
+    "set-operations": "^2.0.2",
     "ts-node": "^10.9.1",
     "typescript": "^4.9.3"
   }

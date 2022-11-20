@@ -1,4 +1,6 @@
+import { crc32 } from 'crc';
 import fs from 'fs/promises';
+import path from 'path';
 import globToTree, { ITree } from 'glob-tree-list';
 import ProgressBar from 'progress';
 
@@ -46,12 +48,14 @@ export class OwnershipTree {
             return this.ownership;
         }
         if (this.chilren.length) {
-            return this.chilren
-                .find((child) => {
-                    return path.startsWith(child.path);
-                })!
-                .getFileOwnership(path);
+            const child = this.chilren.find((child) => {
+                return path.startsWith(child.path);
+            });
+            if (child) {
+                return child.getFileOwnership(path);
+            }
         }
+        console.log(this.chilren.map((child) => child.path));
         throw new Error(`unknown path ${path} at ${this.path}`);
     }
     static fromJSON(treeData: OwnershipTree) {
@@ -70,7 +74,15 @@ export const getOwnershipTree = async (
     codeownersString: string,
     cache: boolean
 ): Promise<OwnershipTree> => {
-    const fileName = `./.raw-ownership-${files.length}.json`;
+    const cacheKey = crc32(files.sort().join('') + codeownersString).toString(
+        16
+    );
+    const fileName = path.resolve(
+        __dirname,
+        '..',
+        '.cache',
+        `raw-ownership-${cacheKey}.json`
+    );
     try {
         if (!cache) throw new Error("Don't use cache");
         const tree = OwnershipTree.fromJSON(
@@ -118,6 +130,7 @@ export const getOwnershipTree = async (
         console.log('Ownership matched');
 
         if (cache) {
+            await fs.mkdir(path.dirname(fileName), { recursive: true });
             await fs.writeFile(
                 fileName,
                 JSON.stringify(root.toJSON(), null, 2)
