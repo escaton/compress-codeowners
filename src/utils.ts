@@ -24,18 +24,18 @@ export const mergeMaps = (maps: Map<string, number>[]) => {
 };
 
 export const getTail = (
-    entries: [name: string, value: number][],
+    entries: [name: string, value: [count: number, key: string]][],
     coef: number
 ): string[] => {
     const sorted = entries.slice().sort((a, b) => {
-        return b[1] - a[1];
+        return b[1][0] - a[1][0];
     });
 
     const res: string[] = [];
 
     while (
         sorted.length > 1 &&
-        sorted[0][1] > sorted[sorted.length - 1][1] / coef
+        sorted[0][1][0] > sorted[sorted.length - 1][1][0] / coef
     ) {
         res.push(sorted.pop()![0]);
     }

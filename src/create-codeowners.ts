@@ -7,15 +7,19 @@ import { OwnershipTree, getOwnershipTree } from './ownership-tree';
 import { getTail, mapsKeysAreSame } from './utils';
 
 class Entry {
-    private internalOwnership: Map<string, number>;
+    private debugInitialOwnership: Map<string, [count: number, key: string]>;
+    private internalOwnership: Map<string, [count: number, key: string]>;
     private looseOwnership: Set<string>;
-    ownership: Map<string, number>;
+    ownership: Map<string, [count: number, key: string]>;
     path: string;
     parentEntry?: Entry;
     children: Entry[] = [];
     constructor(tree: OwnershipTree, parentEntry?: Entry) {
         this.internalOwnership = new Map(tree.ownership);
-        this.looseOwnership = new Set(getTail(tree.ownership, 0.5));
+        this.debugInitialOwnership = new Map(tree.ownership);
+        this.looseOwnership = new Set(
+            getTail(Array.from(tree.ownership.entries()), 0.5)
+        );
         this.ownership = new Map(
             [...this.internalOwnership].filter(
                 ([key]) => !this.looseOwnership.has(key)
@@ -31,15 +35,15 @@ class Entry {
     addChild(entry: Entry) {
         this.children.push(entry);
     }
-    subtractTeamCount(team: string, count: number) {
-        const teamCount = this.internalOwnership.get(team);
-        if (teamCount === undefined) {
+    subtractTeamCount(team: string, diffCount: number) {
+        const [currentCount, key] = this.internalOwnership.get(team) || [];
+        if (currentCount === undefined || key === undefined) {
             throw new Error('Impossible');
         }
-        if (teamCount > 0) {
-            const newCount = teamCount - count;
+        if (currentCount > 0) {
+            const newCount = currentCount - diffCount;
             if (newCount >= 0) {
-                this.internalOwnership.set(team, newCount);
+                this.internalOwnership.set(team, [newCount, key]);
                 if (newCount === 0) {
                     this.ownership.delete(team);
                 }
@@ -51,30 +55,57 @@ class Entry {
         }
     }
 
-    isVisible(): boolean {
+    private isVisible(): boolean {
         return !(
             this.parentEntry &&
             mapsKeysAreSame(this.ownership, this.parentEntry.ownership)
         );
     }
 
-    toString() {
-        if (!this.isVisible()) {
-            return '';
+    hasVaryOwnership() {
+        const uniqKeys = new Set(
+            [...this.ownership.values()].map(([, key]) => key)
+        );
+        return uniqKeys.size > 1;
+    }
+
+    toString(debug: boolean = false) {
+        let result = '';
+        if (this.isVisible()) {
+            const teams = [...this.ownership.entries()]
+                .filter(([team, [number]]) => {
+                    if (number <= 0) {
+                        throw new Error('Impossible');
+                    }
+                    // number should be always > 0
+                    if (number > 0 && team !== 'none') {
+                        return true;
+                    }
+                    return false;
+                })
+                .map(([team]) => team);
+            if (teams.length > 0) {
+                result = `${this.path} ${teams.join(' ')}\n`;
+            }
         }
-        const teams = [...this.ownership.entries()]
-            .filter(([team, number]) => {
-                // number should be always > 0
-                if (number > 0 && team !== 'none') {
-                    return true;
-                }
-                return false;
-            })
-            .map(([team]) => team);
-        if (teams.length > 0) {
-            return `${this.path} ${teams.join(' ')}\n`;
+        if (debug) {
+            result = [
+                `# initial ownership:`,
+                ...[...this.debugInitialOwnership.entries()]
+                    .sort((a, b) => b[1][0] - a[1][0])
+                    .map(([team, [count]]) => {
+                        return `#    ${[
+                            this.looseOwnership.has(team) ? 'lossy' : '     ',
+                            this.ownership.has(team) ? '        ' : 'narrowed',
+                            `${this.internalOwnership.get(team)![0]}/${count}`.padEnd(10),
+                            team,
+                        ].join(' ')}`;
+                    }),
+                result === '' ? `# ${this.path}\n` : result,
+                '',
+            ].join('\n');
         }
-        return '';
+        return result;
     }
     get size(): number {
         return this.toString().length;
@@ -119,21 +150,23 @@ async function main(outputPath: string) {
             break;
         }
 
-        for (let [team, count] of currentEntry.ownership.entries()) {
+        for (let [team, [count]] of currentEntry.ownership.entries()) {
             parentEntry?.subtractTeamCount(team, count);
         }
 
-        tree.chilren.forEach((child) => {
-            queue.enqueue({
-                tree: child,
-                parentEntry: currentEntry,
+        if (currentEntry.hasVaryOwnership()) {
+            tree.chilren.forEach((child) => {
+                queue.enqueue({
+                    tree: child,
+                    parentEntry: currentEntry,
+                });
             });
-        });
+        }
     }
 
     const newCodeowners = entries
         .sort((a, b) => (a.path < b.path ? -1 : 1))
-        .map((entry) => entry.toString())
+        .map((entry) => entry.toString(Boolean(process.env.DEBUG)))
         .join('');
 
     console.log(`Saving to ${outputPath}`);

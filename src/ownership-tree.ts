@@ -12,7 +12,7 @@ import {
 export class OwnershipTree {
     size: number = 1;
     chilren: OwnershipTree[] = [];
-    ownership: [team: string, filesOwned: number][] = [];
+    ownership: Map<string, [filesOwned: number, key: string]> = new Map();
     constructor(public path: string) {}
     addChild(name: string) {
         const child = new OwnershipTree(this.path + name);
@@ -21,31 +21,36 @@ export class OwnershipTree {
     }
     setOwnership(owners: { [key: string]: any }) {
         const teams = Object.keys(owners).map(
-            (team) => [team.replace('@@', '#'), 1] as [string, number]
+            (team) =>
+                [team.replace('@@', '#'), [1, this.path]] as [
+                    string,
+                    [number, string]
+                ]
         );
-        this.ownership = teams.length > 0 ? teams : [['none', 1]];
+        this.ownership = new Map(
+            teams.length > 0 ? teams : [['none', [1, this.path]]]
+        );
     }
     calcOwnership() {
         this.size = this.chilren.reduce((acc, child) => (acc += child.size), 0);
-        const map = new Map<string, number>();
-        this.chilren.forEach((child) =>
-            child.ownership.map(([team, size]) => {
-                map.set(team, (map.get(team) || 0) + size);
-            })
-        );
-        this.ownership = [...map.entries()];
+        this.chilren.forEach((child) => {
+            for (let [team, [count, key]] of child.ownership) {
+                const [prevCount, prevKey] = this.ownership.get(team) || [
+                    0,
+                    '',
+                ];
+                this.ownership.set(team, [prevCount + count, prevKey + key]);
+            }
+        });
     }
-    toJSON(): unknown {
-        return {
-            size: this.size,
-            path: this.path,
-            ownership: this.ownership,
-            chilren: this.chilren.map((child) => child.toJSON()),
-        };
-    }
-    getFileOwnership(path: string): typeof this.ownership {
+    getFileOwnership(
+        path: string
+    ): [team: string, value: [count: number, key: string]][] {
         if (path === this.path) {
-            return this.ownership;
+            if (!this.ownership.entries) {
+                console.log(this.ownership)
+            }
+            return Array.from(this.ownership.entries());
         }
         if (this.chilren.length) {
             const child = this.chilren.find((child) => {
@@ -58,10 +63,18 @@ export class OwnershipTree {
         console.log(this.chilren.map((child) => child.path));
         throw new Error(`unknown path ${path} at ${this.path}`);
     }
+    toJSON(): unknown {
+        return {
+            size: this.size,
+            path: this.path,
+            ownership: Array.from(this.ownership.entries()),
+            chilren: this.chilren.map((child) => child.toJSON()),
+        };
+    }
     static fromJSON(treeData: OwnershipTree) {
         const tree = new OwnershipTree(treeData.path);
         tree.size = treeData.size;
-        tree.ownership = treeData.ownership;
+        tree.ownership = new Map(treeData.ownership);
         tree.chilren = treeData.chilren.map((childData) => {
             return OwnershipTree.fromJSON(childData);
         });
@@ -74,9 +87,9 @@ export const getOwnershipTree = async (
     codeownersString: string,
     cache: boolean
 ): Promise<OwnershipTree> => {
-    const cacheKey = crc32(files.sort().join('') + codeownersString).toString(
-        16
-    );
+    const cacheKey = crc32(
+        files.sort().join('') + codeownersString + 'version2'
+    ).toString(16);
     const fileName = path.resolve(
         __dirname,
         '..',
@@ -85,11 +98,17 @@ export const getOwnershipTree = async (
     );
     try {
         if (!cache) throw new Error("Don't use cache");
-        const tree = OwnershipTree.fromJSON(
-            JSON.parse(await fs.readFile(fileName, { encoding: 'utf8' }))
-        );
-        console.log(`Use data from ${fileName}`);
-        return tree;
+        const cacheFile = await fs.readFile(fileName, { encoding: 'utf8' })
+        try {
+            const tree = OwnershipTree.fromJSON(
+                JSON.parse(cacheFile)
+            );
+            console.log(`Use data from ${fileName}`);
+            return tree;
+        } catch (e) {
+            console.error(e)
+            throw e;
+        }
     } catch {
         const codeowners = parseCodeowners(codeownersString);
 
