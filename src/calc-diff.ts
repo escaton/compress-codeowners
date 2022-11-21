@@ -2,7 +2,7 @@ import { Table } from 'console-table-printer';
 import fs from 'fs/promises';
 import jsonDiff from 'json-diff';
 
-import { getFiles } from './getFiles';
+import { getFiles } from '../getFiles';
 import { getOwnershipTree } from './ownership-tree';
 
 const prepare = async (

@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import { PriorityQueue } from '@datastructures-js/priority-queue';
 import ProgressBar from 'progress';
 
-import { getFiles } from './getFiles';
+import { getFiles } from '../getFiles';
 import { OwnershipTree, getOwnershipTree } from './ownership-tree';
 
 class Entry {
