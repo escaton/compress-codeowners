@@ -5,8 +5,7 @@
   "license": "MIT",
   "scripts": {
     "start": "ts-node .",
-    "debug": "node --inspect-brk -r ts-node/register src/create-codeowners.ts",
-    "test": "ts-node src/test.ts"
+    "debug": "node --inspect-brk -r ts-node/register src/create-codeowners.ts"
   },
   "dependencies": {
     "@datastructures-js/priority-queue": "^6.1.4",

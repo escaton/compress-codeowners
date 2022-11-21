@@ -82,8 +82,8 @@ export const diffAll = async (
     const table = new Table({
         columns: [
             { name: 'team', alignment: 'left' },
-            { name: 'original' },
-            { name: 'diff', alignment: 'center' },
+            { name: 'original', title: 'files owned' },
+            { name: 'diff', alignment: 'center', title: 'after' },
         ],
     });
 
@@ -116,12 +116,12 @@ export const diffAll = async (
             });
         });
 
-    table.printTable();
     console.log(
         'Total ownership change:',
         '-' + formatPercent(totalOwnershipLost / files.length),
         '+' + formatPercent(totalOwnershipAdded / files.length)
     );
+    table.printTable();
 
     if (forTeam) {
         console.log(`Team #${forTeam} ownership change:`);
