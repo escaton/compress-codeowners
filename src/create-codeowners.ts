@@ -8,14 +8,17 @@ import { OwnershipTree, getOwnershipTree } from './ownership-tree';
 class Entry {
     private debugInitialOwnership: Map<string, [count: number, key: string]>;
     private internalOwnership: Map<string, [count: number, key: string]>;
-    private treeSize: number;
     ownership: Map<string, [count: number, key: string]>;
     ownershipString: string;
     path: string;
     parentEntry?: Entry;
     children: Entry[] = [];
-    constructor(tree: OwnershipTree, parentEntry?: Entry) {
-        this.treeSize = tree.size;
+    constructor(
+        tree: OwnershipTree,
+        parentEntry: Entry | undefined,
+        private lossy1: number,
+        private lossy2: number
+    ) {
         this.debugInitialOwnership = new Map(tree.ownership);
         this.internalOwnership = new Map(tree.ownership);
         this.ownership = this.calcOwnership();
@@ -35,12 +38,6 @@ class Entry {
         if (currentCount === undefined || key === undefined) {
             throw new Error('Impossible');
         }
-        // if (this.path === '/application/src/lazy-modules/board/canvas/models/canvas/') {
-        //     console.log(`${caused.path} -> ${team} ${currentCount}-${diffCount}`)
-        // }
-        // if (team === 'none') {
-        //     return;
-        // }
         if (currentCount >= 0) {
             const newCount = currentCount - diffCount;
             if (newCount >= 0) {
@@ -75,7 +72,8 @@ class Entry {
 
         let filteredOwnership = [...this.internalOwnership].filter(
             ([, [count]]) =>
-                count > maxCount * 0.8 && count >= (sum - count) * 0.5
+                count > maxCount * this.lossy1 &&
+                count >= (sum - count) * this.lossy2
         );
         return new Map(filteredOwnership);
     }
@@ -158,7 +156,19 @@ class Entry {
     }
 }
 
-async function main(outputPath: string) {
+export async function main({
+    inputPath,
+    outputPath,
+    lossy1,
+    lossy2,
+    budget: MAX_BUDGET,
+}: {
+    inputPath: string;
+    outputPath: string;
+    lossy1: number;
+    lossy2: number;
+    budget: number;
+}) {
     console.log('Searching files...');
 
     const files = await getFiles();
@@ -167,11 +177,10 @@ async function main(outputPath: string) {
 
     const root = await getOwnershipTree(
         files,
-        await fs.readFile('../client/CODEOWNERS', { encoding: 'utf8' }),
+        await fs.readFile(inputPath, { encoding: 'utf8' }),
         true
     );
 
-    const MAX_BUDGET = 100000;
     let lastBudget = 0;
     const entries: Entry[] = [];
     const getBudget = (entries: Entry[]) => {
@@ -206,7 +215,7 @@ async function main(outputPath: string) {
     try {
         while (queue.size() > 0) {
             const { tree, parentEntry } = queue.dequeue();
-            const currentEntry = new Entry(tree, parentEntry);
+            const currentEntry = new Entry(tree, parentEntry, lossy1, lossy2);
 
             modifyEntries(
                 () => entries.push(currentEntry),
@@ -262,5 +271,3 @@ async function main(outputPath: string) {
     console.log(`Saving to ${outputPath}`);
     await fs.writeFile(outputPath, newCodeowners);
 }
-
-main(process.argv[2]);

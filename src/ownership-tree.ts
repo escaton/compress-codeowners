@@ -22,7 +22,7 @@ export class OwnershipTree {
     setOwnership(owners: { [key: string]: any }) {
         const teams = Object.keys(owners).map(
             (team) =>
-                [team.replace('@@', '#'), [1, this.path]] as [
+                [team.replace(/(@@|@|#)/, ''), [1, this.path]] as [
                     string,
                     [number, string]
                 ]
@@ -94,7 +94,7 @@ export const getOwnershipTree = async (
     cache: boolean
 ): Promise<OwnershipTree> => {
     const cacheKey = crc32(
-        files.sort().join('') + codeownersString + 'version2'
+        files.sort().join('') + codeownersString + 'version4'
     ).toString(16);
     const fileName = path.resolve(
         __dirname,
