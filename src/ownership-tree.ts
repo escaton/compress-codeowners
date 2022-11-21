@@ -31,6 +31,12 @@ export class OwnershipTree {
             teams.length > 0 ? teams : [['none', [1, this.path]]]
         );
     }
+    hasOwnership() {
+        return !(
+            this.ownership.size === 1 &&
+            this.ownership.has('none')
+        );
+    }
     calcOwnership() {
         this.size = this.chilren.reduce((acc, child) => (acc += child.size), 0);
         this.chilren.forEach((child) => {
@@ -48,7 +54,7 @@ export class OwnershipTree {
     ): [team: string, value: [count: number, key: string]][] {
         if (path === this.path) {
             if (!this.ownership.entries) {
-                console.log(this.ownership)
+                console.log(this.ownership);
             }
             return Array.from(this.ownership.entries());
         }
@@ -98,15 +104,13 @@ export const getOwnershipTree = async (
     );
     try {
         if (!cache) throw new Error("Don't use cache");
-        const cacheFile = await fs.readFile(fileName, { encoding: 'utf8' })
+        const cacheFile = await fs.readFile(fileName, { encoding: 'utf8' });
         try {
-            const tree = OwnershipTree.fromJSON(
-                JSON.parse(cacheFile)
-            );
+            const tree = OwnershipTree.fromJSON(JSON.parse(cacheFile));
             console.log(`Use data from ${fileName}`);
             return tree;
         } catch (e) {
-            console.error(e)
+            console.error(e);
             throw e;
         }
     } catch {

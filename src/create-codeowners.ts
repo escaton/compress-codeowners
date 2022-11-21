@@ -1,13 +1,9 @@
 import fs from 'fs/promises';
 import { PriorityQueue } from '@datastructures-js/priority-queue';
-import { difference as setDifference } from 'set-operations';
 import ProgressBar from 'progress';
 
 import { getFiles } from './getFiles';
 import { OwnershipTree, getOwnershipTree } from './ownership-tree';
-
-let cacheHit = 0;
-let cacheMiss = 0;
 
 class Entry {
     private debugInitialOwnership: Map<string, [count: number, key: string]>;
@@ -22,7 +18,7 @@ class Entry {
         this.treeSize = tree.size;
         this.debugInitialOwnership = new Map(tree.ownership);
         this.internalOwnership = new Map(tree.ownership);
-        this.ownership = new Map(tree.ownership);
+        this.ownership = this.calcOwnership();
         this.ownershipString = Array.from(this.ownership.keys()).join('');
 
         this.path = tree.path;
@@ -34,12 +30,18 @@ class Entry {
     addChild(entry: Entry) {
         this.children.push(entry);
     }
-    subtractTeamCount(team: string, diffCount: number) {
+    subtractTeamCount(team: string, diffCount: number, caused: Entry) {
         const [currentCount, key] = this.internalOwnership.get(team) || [];
         if (currentCount === undefined || key === undefined) {
             throw new Error('Impossible');
         }
-        if (currentCount > 0) {
+        // if (this.path === '/application/src/lazy-modules/board/canvas/models/canvas/') {
+        //     console.log(`${caused.path} -> ${team} ${currentCount}-${diffCount}`)
+        // }
+        // if (team === 'none') {
+        //     return;
+        // }
+        if (currentCount >= 0) {
             const newCount = currentCount - diffCount;
             if (newCount >= 0) {
                 this.internalOwnership.set(team, [newCount, key]);
@@ -58,6 +60,7 @@ class Entry {
                 throw new Error('Impossible');
             }
         } else {
+            console.log(this.path, this.internalOwnership, team, diffCount);
             throw new Error('Impossible');
         }
     }
@@ -71,21 +74,9 @@ class Entry {
                 .pop() || 0;
 
         let filteredOwnership = [...this.internalOwnership].filter(
-            ([, [count]]) => count > maxCount * 0.8 /* && count >= sum */
+            ([, [count]]) =>
+                count > maxCount * 0.8 && count >= (sum - count) * 0.5
         );
-
-        // if (this.path === '/application/src/lazy-modules/board/lazy-modules/') {
-        //     console.log(filteredOwnership, maxCount, sum)
-        // }
-        // filteredOwnership = filteredOwnership.filter(([, [count]]) => {
-
-        // })
-        // if (
-        //     filteredOwnership.length === 1 &&
-        //     filteredOwnership[0][1][0] < this.treeSize
-        // ) {
-        //     filteredOwnership = [];
-        // }
         return new Map(filteredOwnership);
     }
 
@@ -106,7 +97,9 @@ class Entry {
 
     hasVaryOwnership() {
         const uniqKeys = new Set(
-            [...this.ownership.values()].map(([, key]) => key)
+            [...this.internalOwnership.values()]
+                .filter(([count]) => count > 0)
+                .map(([, key]) => key)
         );
         return uniqKeys.size > 1;
     }
@@ -123,19 +116,16 @@ class Entry {
                         if (count <= 0) {
                             throw new Error('Impossible');
                         }
-                        // number should be always > 0
                         if (count > 0 && team !== 'none') {
-                            // if (count > 1) {
                             return true;
-                            // }
                         }
                         return false;
                     })
                     .map(([team]) => team);
                 if (teams.length > 0) {
-                    result = this.cachedString = `${this.path} ${teams.join(
-                        ' '
-                    )}\n`;
+                    result = this.cachedString = `path:${this.path}${
+                        this.path.endsWith('/') ? '**/*' : ''
+                    } ${teams.join(' ')}\n`;
                 }
             }
         }
@@ -145,8 +135,12 @@ class Entry {
                 ...[...this.debugInitialOwnership.entries()]
                     .sort((a, b) => b[1][0] - a[1][0])
                     .map(([team, [count]]) => {
+                        const narrowed =
+                            this.internalOwnership.get(team)![0] === 0;
+                        const lossy = !this.ownership.has(team) && !narrowed;
                         return `#    ${[
-                            this.ownership.has(team) ? '        ' : 'narrowed',
+                            narrowed ? 'narrowed' : '        ',
+                            lossy ? 'lossy' : '     ',
                             `${
                                 this.internalOwnership.get(team)![0]
                             }/${count}`.padEnd(10),
@@ -222,8 +216,18 @@ async function main(outputPath: string) {
             if (parentEntry) {
                 for (let [team, [count]] of currentEntry.ownership.entries()) {
                     modifyEntries(
-                        () => parentEntry.subtractTeamCount(team, count),
-                        () => parentEntry.subtractTeamCount(team, -count)
+                        () =>
+                            parentEntry.subtractTeamCount(
+                                team,
+                                count,
+                                currentEntry
+                            ),
+                        () =>
+                            parentEntry.subtractTeamCount(
+                                team,
+                                -count,
+                                currentEntry
+                            )
                     );
                 }
             }
@@ -233,10 +237,12 @@ async function main(outputPath: string) {
 
             if (currentEntry.hasVaryOwnership()) {
                 tree.chilren.forEach((child) => {
-                    queue.enqueue({
-                        tree: child,
-                        parentEntry: currentEntry,
-                    });
+                    if (child.hasOwnership()) {
+                        queue.enqueue({
+                            tree: child,
+                            parentEntry: currentEntry,
+                        });
+                    }
                 });
             }
         }
@@ -247,8 +253,6 @@ async function main(outputPath: string) {
     }
 
     progress.terminate();
-
-    console.log('cacheHit/cacheMiss', `${cacheHit}/${cacheMiss}`);
 
     const newCodeowners = entries
         .sort((a, b) => (a.path < b.path ? -1 : 1))

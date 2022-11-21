@@ -20,21 +20,22 @@ const prepare = async (testCodeownersPath: string, files: string[]) => {
     );
     const testOwnershipTree = await getOwnershipTree(
         files,
-        testCodeownersString,
+        testCodeownersString.replace(/path:/g, ''),
         false
     );
 
     return [originalOwnershipTree, testOwnershipTree];
 };
 
-const main = async (testCodeownersPath: string) => {
+const main = async (testCodeownersPath: string, forTeam?: string) => {
     const files = await getFiles();
     const [originalOwnershipTree, testOwnershipTree] = await prepare(
         testCodeownersPath,
         files
     );
 
-    const teamsStat: Record<string, { original: number; test: number }> = {};
+    const teamsStat: Record<string, { original: string[]; test: string[] }> =
+        {};
 
     files.forEach((file) => {
         const originalOwnership = originalOwnershipTree
@@ -51,21 +52,21 @@ const main = async (testCodeownersPath: string) => {
         originalOwnership.forEach((team) => {
             if (!teamsStat[team]) {
                 teamsStat[team] = {
-                    original: 0,
-                    test: 0,
+                    original: [],
+                    test: [],
                 };
             }
-            teamsStat[team].original++;
+            teamsStat[team].original.push(file);
         });
 
         testOwnership.forEach((team) => {
             if (!teamsStat[team]) {
                 teamsStat[team] = {
-                    original: 0,
-                    test: 0,
+                    original: [],
+                    test: [],
                 };
             }
-            teamsStat[team].test++;
+            teamsStat[team].test.push(file);
         });
     });
 
@@ -74,7 +75,7 @@ const main = async (testCodeownersPath: string) => {
             { name: 'team', alignment: 'left' }, // with alignment and color
             { name: 'original', alignment: 'right' },
             { name: 'diff', alignment: 'right' },
-            { name: 'repo', alignment: 'right' },
+            { name: 'repo', alignment: 'right', title: 'repo scale' },
         ],
     });
 
@@ -85,11 +86,19 @@ const main = async (testCodeownersPath: string) => {
     let totalOwnershipAdded = 0;
     let totalOwnershipLost = 0;
     Object.entries(teamsStat)
-        .sort(
-            ([, a], [, b]) =>
-                Math.abs(b.test - b.original) / files.length -
-                Math.abs(a.test - a.original) / files.length
+        .map(
+            ([team, { original, test }]) =>
+                [
+                    team,
+                    { original: original.length, test: test.length },
+                    Math.abs(test.length - original.length) / files.length,
+                ] as [
+                    team: string,
+                    stats: { original: number; test: number },
+                    sortBy: number
+                ]
         )
+        .sort(([, , a], [, , b]) => b - a)
         .forEach(([team, { original, test }]) => {
             const sign = test - original > 0 ? '+' : '';
 
@@ -112,6 +121,18 @@ const main = async (testCodeownersPath: string) => {
         formatPercent(totalOwnershipLost),
         '+' + formatPercent(totalOwnershipAdded)
     );
+
+    if (forTeam) {
+        console.log(
+            jsonDiff.diffString(
+                teamsStat[forTeam].original,
+                teamsStat[forTeam].test,
+                {
+                    maxElisions: 1,
+                }
+            )
+        );
+    }
 };
 
 const testSpecificFile = async (
@@ -142,10 +163,14 @@ const testSpecificFile = async (
     }
 };
 
-const [, , testCodeownersPath, specificFile] = process.argv;
+const [, , testCodeownersPath, details] = process.argv;
 
-if (specificFile) {
-    testSpecificFile(testCodeownersPath, specificFile);
+if (details) {
+    if (details.startsWith('#')) {
+        main(testCodeownersPath, details);
+    } else {
+        testSpecificFile(testCodeownersPath, details);
+    }
 } else {
     main(testCodeownersPath);
 }
