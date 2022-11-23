@@ -11,12 +11,12 @@ import {
 
 export class OwnershipTree {
     size: number = 1;
-    chilren: OwnershipTree[] = [];
+    children: OwnershipTree[] = [];
     ownership: Map<string, [filesOwned: number, key: string]> = new Map();
     constructor(public path: string) {}
     addChild(name: string) {
         const child = new OwnershipTree(this.path + name);
-        this.chilren.push(child);
+        this.children.push(child);
         return child;
     }
     setOwnership(owners: { [key: string]: any }) {
@@ -38,8 +38,8 @@ export class OwnershipTree {
         );
     }
     calcOwnership() {
-        this.size = this.chilren.reduce((acc, child) => (acc += child.size), 0);
-        this.chilren.forEach((child) => {
+        this.size = this.children.reduce((acc, child) => (acc += child.size), 0);
+        this.children.forEach((child) => {
             for (let [team, [count, key]] of child.ownership) {
                 const [prevCount, prevKey] = this.ownership.get(team) || [
                     0,
@@ -58,15 +58,15 @@ export class OwnershipTree {
             }
             return Array.from(this.ownership.entries());
         }
-        if (this.chilren.length) {
-            const child = this.chilren.find((child) => {
+        if (this.children.length) {
+            const child = this.children.find((child) => {
                 return path.startsWith(child.path);
             });
             if (child) {
                 return child.getFileOwnership(path);
             }
         }
-        console.log(this.chilren.map((child) => child.path));
+        console.log(this.children.map((child) => child.path));
         throw new Error(`unknown path ${path} at ${this.path}`);
     }
     toJSON(): unknown {
@@ -74,14 +74,14 @@ export class OwnershipTree {
             size: this.size,
             path: this.path,
             ownership: Array.from(this.ownership.entries()),
-            chilren: this.chilren.map((child) => child.toJSON()),
+            children: this.children.map((child) => child.toJSON()),
         };
     }
     static fromJSON(treeData: OwnershipTree) {
         const tree = new OwnershipTree(treeData.path);
         tree.size = treeData.size;
         tree.ownership = new Map(treeData.ownership);
-        tree.chilren = treeData.chilren.map((childData) => {
+        tree.children = treeData.children.map((childData) => {
             return OwnershipTree.fromJSON(childData);
         });
         return tree;
@@ -94,7 +94,7 @@ export const getOwnershipTree = async (
     cache: boolean
 ): Promise<OwnershipTree> => {
     const cacheKey = crc32(
-        files.sort().join('') + codeownersString + 'version4'
+        files.sort().join('') + codeownersString + 'version5'
     ).toString(16);
     const fileName = path.resolve(
         __dirname,

@@ -124,11 +124,11 @@ export const diffAll = async (
     table.printTable();
 
     if (forTeam) {
-        console.log(`Team #${forTeam} ownership change:`);
+        console.log(`Team ${forTeam} ownership change:`);
         console.log(
             jsonDiff.diffString(
-                teamsStat['#' + forTeam].original,
-                teamsStat['#' + forTeam].test,
+                teamsStat[forTeam].original,
+                teamsStat[forTeam].test,
                 {
                     maxElisions: 1,
                 }

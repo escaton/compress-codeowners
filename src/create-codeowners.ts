@@ -6,146 +6,171 @@ import { getFiles } from '../getFiles';
 import { OwnershipTree, getOwnershipTree } from './ownership-tree';
 
 class Entry {
-    private debugInitialOwnership: Map<string, [count: number, key: string]>;
-    private internalOwnership: Map<string, [count: number, key: string]>;
-    ownership: Map<string, [count: number, key: string]>;
-    ownershipString: string;
-    path: string;
+    private initialOwnership: Map<string, [count: number, key: string]>;
+    fullOwnership: Map<string, [count: number, key: string]>;
+    visibleOwnership: string[];
+    lossyOwnershipString: string;
     parentEntry?: Entry;
     children: Entry[] = [];
+    position: number = -1;
+
+    private debugMessages: string[] = [];
     constructor(
-        tree: OwnershipTree,
+        public tree: OwnershipTree,
         parentEntry: Entry | undefined,
         private lossy1: number,
         private lossy2: number
     ) {
-        this.debugInitialOwnership = new Map(tree.ownership);
-        this.internalOwnership = new Map(tree.ownership);
-        this.ownership = this.calcOwnership();
-        this.ownershipString = Array.from(this.ownership.keys()).join('');
+        this.initialOwnership = new Map(tree.ownership);
+        this.fullOwnership = new Map(tree.ownership);
+        this.visibleOwnership = this.calcVisibleOwnership();
+        this.lossyOwnershipString = Array.from(this.lossyOwnership.keys()).join(
+            ''
+        );
 
-        this.path = tree.path;
         if (parentEntry) {
             this.parentEntry = parentEntry;
             parentEntry.addChild(this);
         }
     }
-    addChild(entry: Entry) {
-        this.children.push(entry);
-    }
-    subtractTeamCount(team: string, diffCount: number, caused: Entry) {
-        const [currentCount, key] = this.internalOwnership.get(team) || [];
-        if (currentCount === undefined || key === undefined) {
-            throw new Error('Impossible');
-        }
-        if (currentCount >= 0) {
-            const newCount = currentCount - diffCount;
-            if (newCount >= 0) {
-                this.internalOwnership.set(team, [newCount, key]);
 
-                this.ownership = this.calcOwnership();
-                const newOwnershipString = Array.from(
-                    this.ownership.keys()
-                ).join('');
-
-                if (this.ownershipString !== newOwnershipString) {
-                    this.cachedString = undefined;
-                }
-
-                this.ownershipString = newOwnershipString;
-            } else {
-                throw new Error('Impossible');
-            }
-        } else {
-            console.log(this.path, this.internalOwnership, team, diffCount);
-            throw new Error('Impossible');
-        }
-    }
-
-    private calcOwnership() {
+    get lossyOwnership() {
         let sum = 0;
         const maxCount =
-            [...this.internalOwnership]
+            [...this.fullOwnership]
                 .map(([, [count]]) => ((sum += count), count))
                 .sort((a, b) => a - b)
                 .pop() || 0;
 
-        let filteredOwnership = [...this.internalOwnership].filter(
+        const filteredOwnership = [...this.fullOwnership].filter(
             ([, [count]]) =>
+                // TODO find examples where this could be usefull
                 count > maxCount * this.lossy1 &&
+                // count > 0 &&
                 count >= (sum - count) * this.lossy2
         );
         return new Map(filteredOwnership);
     }
 
-    private isUnlikeParent(): boolean {
-        let visibleParent = this.parentEntry;
-        while (visibleParent) {
-            if (visibleParent.size > 0) {
-                break;
-            }
-            visibleParent = visibleParent.parentEntry;
-        }
+    addChild(entry: Entry) {
+        this.children.push(entry);
+    }
 
-        if (visibleParent) {
-            return this.ownershipString !== visibleParent.ownershipString;
-        }
-        return true;
+    removeChild(entry: Entry) {
+        this.children = this.children.filter((child) => child !== entry);
     }
 
     hasVaryOwnership() {
         const uniqKeys = new Set(
-            [...this.internalOwnership.values()]
+            [...this.fullOwnership.values()]
                 .filter(([count]) => count > 0)
                 .map(([, key]) => key)
         );
         return uniqKeys.size > 1;
     }
 
-    private cachedString: string | undefined = undefined;
-    toString(debug: boolean = false) {
-        let result = '';
-        if (this.isUnlikeParent()) {
-            if (this.cachedString !== undefined) {
-                result = this.cachedString;
-            } else {
-                const teams = [...this.ownership.entries()]
-                    .filter(([team, [count]]) => {
-                        if (count <= 0) {
-                            throw new Error('Impossible');
-                        }
-                        if (count > 0 && team !== 'none') {
-                            return true;
-                        }
-                        return false;
-                    })
-                    .map(([team]) => team);
-                if (teams.length > 0) {
-                    result = this.cachedString = `path:${this.path}${
-                        this.path.endsWith('/') ? '**/*' : ''
-                    } ${teams.join(' ')}\n`;
+    downToTopUpdate() {
+        this.debugMessages = [];
+        this.fullOwnership = new Map();
+        for (let [team, [count, key]] of this.initialOwnership) {
+            this.fullOwnership.set(team, [count, key]);
+        }
+
+        const visibleChildrenSets = new Map<string, number>();
+
+        this.children.forEach((child) => {
+            child.downToTopUpdate();
+            for (let [team, [count]] of child.initialOwnership) {
+                if (team === 'none' && child.visibleOwnership.length === 0) {
+                    continue;
+                }
+                this.fullOwnership.get(team)![0] -= count;
+            }
+
+            if (child.visibleOwnership.length > 0) {
+                const key = child.visibleOwnership.join(' ');
+                const existingCount = visibleChildrenSets.get(key);
+                visibleChildrenSets.set(key, (existingCount || 0) + 1);
+            }
+        });
+
+        this.visibleOwnership = this.calcVisibleOwnership();
+        if (this.visibleOwnership.length === 0) {
+            this.debugMessages.push(`Skip: no ownership to display`);
+        }
+
+        if (this.lossyOwnership.size === 0) {
+            const [topChildSet] = [...visibleChildrenSets].sort(
+                ([, a], [, b]) => b - a
+            );
+            if (topChildSet) {
+                this.visibleOwnership = topChildSet[0].split(' ');
+                this.debugMessages.push(
+                    `Force visible ownership for most frequent children: ${topChildSet[0]}`
+                );
+            }
+        }
+    }
+
+    topToDownUpdate() {
+        if (this.visibleOwnership.length > 0) {
+            let visibleParent = this.parentEntry;
+            while (visibleParent) {
+                if (visibleParent.visibleOwnership.length > 0) {
+                    break;
+                }
+                visibleParent = visibleParent.parentEntry;
+            }
+            if (visibleParent) {
+                if (
+                    this.visibleOwnership.join(' ') ===
+                    visibleParent.visibleOwnership.join(' ')
+                ) {
+                    this.debugMessages.push(
+                        `Skip: same ownership as ${visibleParent.tree.path}`
+                    );
+                    this.visibleOwnership = [];
                 }
             }
         }
+
+        this.children.forEach((child) => child.topToDownUpdate());
+    }
+
+    calcVisibleOwnership() {
+        return [...this.lossyOwnership]
+            .filter(([team]) => team !== 'none')
+            .map(([team]) => team);
+    }
+
+    toString(debug: boolean = false) {
+        let result = '';
+        const teams = this.visibleOwnership.map((team) => '#' + team);
+        if (teams.length > 0) {
+            result = `path:${this.tree.path}${
+                this.tree.path.endsWith('/') ? '**/*' : ''
+            } ${teams.join(' ')}\n`;
+        }
         if (debug) {
             result = [
-                `# initial ownership:`,
-                ...[...this.debugInitialOwnership.entries()]
+                `# position: ${this.position}`,
+                `# ownership:`,
+                ...[...this.initialOwnership.entries()]
                     .sort((a, b) => b[1][0] - a[1][0])
                     .map(([team, [count]]) => {
-                        const narrowed =
-                            this.internalOwnership.get(team)![0] === 0;
-                        const lossy = !this.ownership.has(team) && !narrowed;
+                        const ownedCount = this.fullOwnership.get(team)![0];
+                        const narrowed = ownedCount === 0;
+                        const lossy =
+                            !this.lossyOwnership.has(team) && !narrowed;
                         return `#    ${[
                             narrowed ? 'narrowed' : '        ',
                             lossy ? 'lossy' : '     ',
-                            `${
-                                this.internalOwnership.get(team)![0]
-                            }/${count}`.padEnd(10),
+                            `${ownedCount}/${count}`.padEnd(10),
                             team,
                         ].join(' ')}`;
                     }),
-                result === '' ? `# ${this.path}\n` : result,
+                ...this.debugMessages.map((message) => `# ${message}`),
+                result === '' ? `# ${this.tree.path}\n` : result,
                 '',
             ].join('\n');
         }
@@ -188,10 +213,12 @@ export async function main({
     };
     const modifyEntries = (cb: () => void, rollback: () => void) => {
         cb();
+        entries[0].downToTopUpdate();
+        entries[0].topToDownUpdate();
         const budget = getBudget(entries);
         if (budget > MAX_BUDGET) {
             rollback();
-            throw 'finish';
+            // throw 'finish';
         }
         lastBudget = budget;
     };
@@ -203,9 +230,9 @@ export async function main({
         return b.tree.size - a.tree.size;
     });
 
-    queue.enqueue({ tree: root });
+    queue.push({ tree: root });
 
-    const progress = new ProgressBar('[:bar]', {
+    const progress = new ProgressBar('[:bar] queue size: :queue_size', {
         total: MAX_BUDGET,
         width: 80,
         complete: '█',
@@ -214,40 +241,27 @@ export async function main({
     });
     try {
         while (queue.size() > 0) {
-            const { tree, parentEntry } = queue.dequeue();
+            const { tree, parentEntry } = queue.pop();
             const currentEntry = new Entry(tree, parentEntry, lossy1, lossy2);
 
             modifyEntries(
-                () => entries.push(currentEntry),
-                () => entries.pop()
+                () => (currentEntry.position = entries.push(currentEntry)),
+                () => parentEntry?.removeChild(entries.pop()!)
             );
 
-            if (parentEntry) {
-                for (let [team, [count]] of currentEntry.ownership.entries()) {
-                    modifyEntries(
-                        () =>
-                            parentEntry.subtractTeamCount(
-                                team,
-                                count,
-                                currentEntry
-                            ),
-                        () =>
-                            parentEntry.subtractTeamCount(
-                                team,
-                                -count,
-                                currentEntry
-                            )
-                    );
-                }
-            }
-
-            progress.update(lastBudget / MAX_BUDGET);
-            progress.tick();
+            progress.update(Math.min(lastBudget / MAX_BUDGET, 0.999));
+            progress.tick({queue_size: queue.size()});
 
             if (currentEntry.hasVaryOwnership()) {
-                tree.chilren.forEach((child) => {
+                // we are sure there will be more then one file
+                let treeToUnwrap = tree;
+                while (treeToUnwrap.children.length === 1) {
+                    // skip single directories
+                    treeToUnwrap = treeToUnwrap.children[0];
+                }
+                treeToUnwrap.children.forEach((child) => {
                     if (child.hasOwnership()) {
-                        queue.enqueue({
+                        queue.push({
                             tree: child,
                             parentEntry: currentEntry,
                         });
@@ -264,7 +278,7 @@ export async function main({
     progress.terminate();
 
     const newCodeowners = entries
-        .sort((a, b) => (a.path < b.path ? -1 : 1))
+        .sort((a, b) => (a.tree.path < b.tree.path ? -1 : 1))
         .map((entry) => entry.toString(Boolean(process.env.DEBUG)))
         .join('');
 
