@@ -8,8 +8,8 @@ import { shortenNames } from './shorten-names';
 class Entry {
     private initialOwnership: Map<string, [count: number, key: string]>;
     fullOwnership: Map<string, [count: number, key: string]>;
+    lossyOwnership: Map<string, [count: number, key: string]>;
     visibleOwnership: string[];
-    lossyOwnershipString: string;
     children: Entry[] = [];
     position: number = -1;
 
@@ -27,33 +27,13 @@ class Entry {
     ) {
         this.pathSegments = tree.path === '/' ? [''] : tree.path.split('/');
         this.initialOwnership = new Map(tree.ownership);
-        this.fullOwnership = new Map(tree.ownership);
+        this.fullOwnership = this.initialOwnership;
+        this.lossyOwnership = this.initialOwnership;
         this.visibleOwnership = this.calcVisibleOwnership();
-        this.lossyOwnershipString = Array.from(this.lossyOwnership.keys()).join(
-            ''
-        );
 
         if (parentEntry) {
             parentEntry.addChild(this);
         }
-    }
-
-    get lossyOwnership() {
-        let sum = 0;
-        const maxCount =
-            [...this.fullOwnership]
-                .map(([, [count]]) => ((sum += count), count))
-                .sort((a, b) => a - b)
-                .pop() || 0;
-
-        const filteredOwnership = [...this.fullOwnership].filter(
-            ([, [count]]) =>
-                // TODO find examples where this could be usefull
-                count > maxCount * this.options.lossy1 &&
-                // count > 0 &&
-                count >= (sum - count) * this.options.lossy2
-        );
-        return new Map(filteredOwnership);
     }
 
     addChild(entry: Entry) {
@@ -123,6 +103,7 @@ class Entry {
             }
         });
 
+        this.lossyOwnership = this.calcLossyOwnership();
         this.visibleOwnership = this.calcVisibleOwnership();
         if (this.visibleOwnership.length === 0) {
             this.debugMessages.push(`Skip: no ownership to display`);
@@ -178,6 +159,38 @@ class Entry {
         }
 
         this.children.forEach((child) => child.topToDownUpdate());
+    }
+
+
+    calcLossyOwnership() {
+        let sum = 0;
+        let maxCount = 0;
+        const uniqKeys = new Set<string>();
+
+        let filteredOwnership = [];
+        for (const [team, [count, key]] of this.fullOwnership) {
+            if (count > maxCount) {
+                maxCount = count;
+            }
+            sum += count;
+            if (count > 0) {
+                filteredOwnership.push([team, [count, key]] as [string, [number, string]]);
+                uniqKeys.add(key);
+            }
+        }
+
+        if (uniqKeys.size === 1) {
+            return new Map(filteredOwnership);
+        }
+
+        filteredOwnership = [...this.fullOwnership].filter(
+            ([, [count]]) =>
+                // TODO find examples where this could be usefull
+                count > maxCount * this.options.lossy1 &&
+                // count > 0 &&
+                count >= (sum - count) * this.options.lossy2
+        );
+        return new Map(filteredOwnership);
     }
 
     calcVisibleOwnership() {
@@ -240,7 +253,7 @@ export async function main({
     lossy2,
     budget: MAX_BUDGET,
     useGlobs,
-    files
+    files,
 }: {
     inputPath: string;
     outputPath: string;
@@ -248,7 +261,7 @@ export async function main({
     lossy2: number;
     budget: number;
     useGlobs: boolean;
-    files: string[]
+    files: string[];
 }) {
     console.log('Searching files...');
 
