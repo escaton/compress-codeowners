@@ -3,7 +3,7 @@
 1. Run `yarn` to install all deps
 2. Get list of files of interest
     ```shell
-    ./bin generate-files [-c <CWD>] \
+    ./bin generate-files [-c CWD] \
         '**/*.(js|ts)' \
         '!**/node_modules' \
     > files.txt

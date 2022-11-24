@@ -2,7 +2,6 @@ import fs from 'fs/promises';
 import { PriorityQueue } from '@datastructures-js/priority-queue';
 import ProgressBar from 'progress';
 
-import { getFiles } from './getFiles';
 import { OwnershipTree, getOwnershipTree } from './ownership-tree';
 import { shortenNames } from './shorten-names';
 
@@ -11,7 +10,6 @@ class Entry {
     fullOwnership: Map<string, [count: number, key: string]>;
     visibleOwnership: string[];
     lossyOwnershipString: string;
-    parentEntry?: Entry;
     children: Entry[] = [];
     position: number = -1;
 
@@ -20,7 +18,7 @@ class Entry {
     private debugMessages: string[] = [];
     constructor(
         public tree: OwnershipTree,
-        parentEntry: Entry | undefined,
+        private parentEntry: Entry | undefined,
         private options: {
             lossy1: number;
             lossy2: number;
@@ -36,7 +34,6 @@ class Entry {
         );
 
         if (parentEntry) {
-            this.parentEntry = parentEntry;
             parentEntry.addChild(this);
         }
     }
@@ -275,6 +272,8 @@ export async function main({
         const budget = getBudget(entries);
         if (budget > MAX_BUDGET) {
             rollback();
+            entries[0].downToTopUpdate();
+            entries[0].topToDownUpdate();
         }
         lastBudget = budget;
     };

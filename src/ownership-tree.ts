@@ -114,9 +114,8 @@ export const getOwnershipTree = async (
         files.sort().join('') + codeownersString + 'version 11'
     ).toString(16);
     const fileName = path.resolve(
-        __dirname,
-        '..',
-        '.cache',
+        os.tmpdir(),
+        'compress-codeowners',
         `raw-ownership-${cacheKey}.json`
     );
     try {
@@ -124,7 +123,6 @@ export const getOwnershipTree = async (
         const cacheFile = await fs.readFile(fileName, { encoding: 'utf8' });
         try {
             const tree = OwnershipTree.fromJSON(JSON.parse(cacheFile));
-            console.log(`Use data from ${fileName}`);
             return tree;
         } catch (e) {
             console.error(e);

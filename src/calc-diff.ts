@@ -24,7 +24,7 @@ const prepare = async (
     const testOwnershipTree = await getOwnershipTree(
         files,
         testCodeownersString.replace(/path:/g, ''),
-        false
+        true
     );
 
     return [originalOwnershipTree, testOwnershipTree];
