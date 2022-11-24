@@ -1,8 +1,11 @@
 import yargs from 'yargs';
+import { hideBin } from 'yargs/helpers';
 import { diffAll, diffSpecificFile } from './src/calc-diff';
 import { main } from './src/create-codeowners';
+import { getFiles } from './src/getFiles';
+import { readFilesFromStdin } from './src/read-files';
 
-yargs(process.argv.slice(2))
+yargs(hideBin(process.argv))
     .usage('Usage: yarn strart [command]')
     .command(
         'compress <input> <output>',
@@ -42,7 +45,8 @@ yargs(process.argv.slice(2))
                     type: 'number',
                 });
         },
-        (argv) => {
+        async (argv) => {
+            const files = await readFilesFromStdin();
             main({
                 inputPath: argv.input!,
                 outputPath: argv.output!,
@@ -50,6 +54,7 @@ yargs(process.argv.slice(2))
                 lossy2: argv.lossy2,
                 budget: argv.budget,
                 useGlobs: argv.useGlobs,
+                files,
             });
         }
     )
@@ -77,20 +82,57 @@ yargs(process.argv.slice(2))
                 })
                 .check((argv) => {
                     if (argv.team?.match(/^(#|@)/)) {
-                        console.log(argv.team?.match(/^(#|@)/))
+                        console.log(argv.team?.match(/^(#|@)/));
                         throw new Error(
                             'Argument team: use team name without # or @'
                         );
                     }
-                    return true
+                    return true;
                 });
         },
-        (argv) => {
+        async (argv) => {
             if (argv.path) {
-                diffSpecificFile(argv.original!, argv.test!, argv.path);
+                diffSpecificFile({
+                    originalCodeownersPath: argv.original!,
+                    testCodeownersPath: argv.test!,
+                    specificFile: argv.path,
+                });
             } else {
-                diffAll(argv.original!, argv.test!, argv.team);
+                const files = await readFilesFromStdin();
+                diffAll({
+                    originalCodeownersPath: argv.original!,
+                    testCodeownersPath: argv.test!,
+                    files,
+                    forTeam: argv.team,
+                });
             }
+        }
+    )
+    .command(
+        'generate-files <matchers..>',
+        'generate list of files whose ownership is going to be optimized',
+        (tune) => {
+            return tune
+                .positional('matchers', {
+                    array: true,
+                    type: 'string',
+                })
+                .option('cwd', {
+                    default: '.',
+                    alias: 'c',
+                    describe: 'cwd for matching files',
+                    type: 'string',
+                });
+        },
+        async ({ matchers, cwd }) => {
+            const files = await getFiles(matchers!, cwd);
+            console.log(`# ${files.length} files`);
+            console.log(`# cwd: ${cwd}`);
+            console.log(`# matchers:`);
+            matchers!.forEach((matcher) => console.log(`#    ${matcher}`));
+            files.forEach((file) => console.log(file));
+            // print to stderr not to corrupt stdout content
+            console.error(`Done, matched ${files.length} files.`);
         }
     )
     .strict()

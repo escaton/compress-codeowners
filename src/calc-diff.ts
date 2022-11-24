@@ -2,7 +2,6 @@ import { Table } from 'console-table-printer';
 import fs from 'fs/promises';
 import jsonDiff from 'json-diff';
 
-import { getFiles } from '../getFiles';
 import { getOwnershipTree } from './ownership-tree';
 
 const prepare = async (
@@ -31,12 +30,17 @@ const prepare = async (
     return [originalOwnershipTree, testOwnershipTree];
 };
 
-export const diffAll = async (
-    originalCodeownersPath: string,
-    testCodeownersPath: string,
-    forTeam?: string
-) => {
-    const files = await getFiles();
+export const diffAll = async ({
+    originalCodeownersPath,
+    testCodeownersPath,
+    files,
+    forTeam,
+}: {
+    originalCodeownersPath: string;
+    testCodeownersPath: string;
+    files: string[];
+    forTeam?: string;
+}) => {
     const [originalOwnershipTree, testOwnershipTree] = await prepare(
         originalCodeownersPath,
         testCodeownersPath,
@@ -137,11 +141,15 @@ export const diffAll = async (
     }
 };
 
-export const diffSpecificFile = async (
-    originalCodeownersPath: string,
-    testCodeownersPath: string,
-    specificFile: string
-) => {
+export const diffSpecificFile = async ({
+    originalCodeownersPath,
+    testCodeownersPath,
+    specificFile,
+}: {
+    originalCodeownersPath: string;
+    testCodeownersPath: string;
+    specificFile: string;
+}) => {
     const [originalOwnershipTree, testOwnershipTree] = await prepare(
         originalCodeownersPath,
         testCodeownersPath,

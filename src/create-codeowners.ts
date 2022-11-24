@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import { PriorityQueue } from '@datastructures-js/priority-queue';
 import ProgressBar from 'progress';
 
-import { getFiles } from '../getFiles';
+import { getFiles } from './getFiles';
 import { OwnershipTree, getOwnershipTree } from './ownership-tree';
 import { shortenNames } from './shorten-names';
 
@@ -243,6 +243,7 @@ export async function main({
     lossy2,
     budget: MAX_BUDGET,
     useGlobs,
+    files
 }: {
     inputPath: string;
     outputPath: string;
@@ -250,10 +251,9 @@ export async function main({
     lossy2: number;
     budget: number;
     useGlobs: boolean;
+    files: string[]
 }) {
     console.log('Searching files...');
-
-    const files = await getFiles();
 
     console.log(`Found ${files.length} files`);
 

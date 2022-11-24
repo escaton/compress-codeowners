@@ -1,7 +1,8 @@
 {
-  "name": "sentry-codeownership",
+  "name": "compress-codeowners",
   "version": "1.0.0",
   "main": "index.ts",
+  "bin": "./bin",
   "license": "MIT",
   "scripts": {
     "start": "ts-node .",
