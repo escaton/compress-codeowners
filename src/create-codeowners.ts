@@ -4,6 +4,7 @@ import ProgressBar from 'progress';
 
 import { getFiles } from '../getFiles';
 import { OwnershipTree, getOwnershipTree } from './ownership-tree';
+import { shortenNames } from './shorten-names';
 
 class Entry {
     private initialOwnership: Map<string, [count: number, key: string]>;
@@ -14,13 +15,19 @@ class Entry {
     children: Entry[] = [];
     position: number = -1;
 
+    private namesMap: Map<string, string> = new Map();
+    private pathSegments: string[];
     private debugMessages: string[] = [];
     constructor(
         public tree: OwnershipTree,
         parentEntry: Entry | undefined,
-        private lossy1: number,
-        private lossy2: number
+        private options: {
+            lossy1: number;
+            lossy2: number;
+            useGlobs: boolean;
+        }
     ) {
+        this.pathSegments = tree.path === '/' ? [''] : tree.path.split('/');
         this.initialOwnership = new Map(tree.ownership);
         this.fullOwnership = new Map(tree.ownership);
         this.visibleOwnership = this.calcVisibleOwnership();
@@ -45,19 +52,44 @@ class Entry {
         const filteredOwnership = [...this.fullOwnership].filter(
             ([, [count]]) =>
                 // TODO find examples where this could be usefull
-                count > maxCount * this.lossy1 &&
+                count > maxCount * this.options.lossy1 &&
                 // count > 0 &&
-                count >= (sum - count) * this.lossy2
+                count >= (sum - count) * this.options.lossy2
         );
         return new Map(filteredOwnership);
     }
 
     addChild(entry: Entry) {
         this.children.push(entry);
+
+        this.updateNamesMap();
     }
 
     removeChild(entry: Entry) {
         this.children = this.children.filter((child) => child !== entry);
+
+        this.updateNamesMap();
+    }
+
+    private updateNamesMap() {
+        if (!this.options.useGlobs) {
+            return;
+        }
+
+        const addedChildrenNames = this.children.map(
+            (child) => child.tree.name
+        );
+
+        let treeToUnwrap = this.tree;
+        while (treeToUnwrap.children.length === 1) {
+            // skip single directories
+            treeToUnwrap = treeToUnwrap.children[0];
+        }
+
+        const allChildrenNames = treeToUnwrap.children.map(
+            (child) => child.name
+        );
+        this.namesMap = shortenNames(addedChildrenNames, allChildrenNames);
     }
 
     hasVaryOwnership() {
@@ -72,7 +104,7 @@ class Entry {
     downToTopUpdate() {
         this.debugMessages = [];
         this.fullOwnership = new Map();
-        for (let [team, [count, key]] of this.initialOwnership) {
+        for (const [team, [count, key]] of this.initialOwnership) {
             this.fullOwnership.set(team, [count, key]);
         }
 
@@ -80,7 +112,7 @@ class Entry {
 
         this.children.forEach((child) => {
             child.downToTopUpdate();
-            for (let [team, [count]] of child.initialOwnership) {
+            for (const [team, [count]] of child.initialOwnership) {
                 if (team === 'none' && child.visibleOwnership.length === 0) {
                     continue;
                 }
@@ -134,6 +166,20 @@ class Entry {
             }
         }
 
+        if (this.parentEntry) {
+            const parentSegments = this.parentEntry.pathSegments;
+            const namesMap = this.parentEntry.namesMap;
+            this.pathSegments = this.pathSegments.map((segment, i) => {
+                if (parentSegments[i] !== undefined) {
+                    return parentSegments[i];
+                }
+                if (i < this.pathSegments.length - 1) {
+                    return '*';
+                }
+                return namesMap.get(segment) ?? segment;
+            });
+        }
+
         this.children.forEach((child) => child.topToDownUpdate());
     }
 
@@ -147,9 +193,14 @@ class Entry {
         let result = '';
         const teams = this.visibleOwnership.map((team) => '#' + team);
         if (teams.length > 0) {
-            result = `path:${this.tree.path}${
-                this.tree.path.endsWith('/') ? '**/*' : ''
-            } ${teams.join(' ')}\n`;
+            result = [
+                `path:`,
+                this.printPath,
+                this.tree.isFile ? '' : '/**/*',
+                ' ',
+                teams.join(' '),
+                '\n',
+            ].join('');
         }
         if (debug) {
             result = [
@@ -170,11 +221,15 @@ class Entry {
                         ].join(' ')}`;
                     }),
                 ...this.debugMessages.map((message) => `# ${message}`),
-                result === '' ? `# ${this.tree.path}\n` : result,
+                `# ${this.tree.path}`,
+                result,
                 '',
             ].join('\n');
         }
         return result;
+    }
+    get printPath(): string {
+        return this.pathSegments.join('/');
     }
     get size(): number {
         return this.toString().length;
@@ -187,12 +242,14 @@ export async function main({
     lossy1,
     lossy2,
     budget: MAX_BUDGET,
+    useGlobs,
 }: {
     inputPath: string;
     outputPath: string;
     lossy1: number;
     lossy2: number;
     budget: number;
+    useGlobs: boolean;
 }) {
     console.log('Searching files...');
 
@@ -218,7 +275,6 @@ export async function main({
         const budget = getBudget(entries);
         if (budget > MAX_BUDGET) {
             rollback();
-            // throw 'finish';
         }
         lastBudget = budget;
     };
@@ -239,46 +295,44 @@ export async function main({
         incomplete: '_',
         clear: true,
     });
-    try {
-        while (queue.size() > 0) {
-            const { tree, parentEntry } = queue.pop();
-            const currentEntry = new Entry(tree, parentEntry, lossy1, lossy2);
+    while (queue.size() > 0) {
+        const { tree, parentEntry } = queue.pop();
+        const currentEntry = new Entry(tree, parentEntry, {
+            lossy1,
+            lossy2,
+            useGlobs,
+        });
 
-            modifyEntries(
-                () => (currentEntry.position = entries.push(currentEntry)),
-                () => parentEntry?.removeChild(entries.pop()!)
-            );
+        modifyEntries(
+            () => (currentEntry.position = entries.push(currentEntry)),
+            () => parentEntry?.removeChild(entries.pop()!)
+        );
 
-            progress.update(Math.min(lastBudget / MAX_BUDGET, 0.999));
-            progress.tick({queue_size: queue.size()});
+        progress.update(Math.min(lastBudget / MAX_BUDGET, 0.999));
+        progress.tick({ queue_size: queue.size() });
 
-            if (currentEntry.hasVaryOwnership()) {
-                // we are sure there will be more then one file
-                let treeToUnwrap = tree;
-                while (treeToUnwrap.children.length === 1) {
-                    // skip single directories
-                    treeToUnwrap = treeToUnwrap.children[0];
-                }
-                treeToUnwrap.children.forEach((child) => {
-                    if (child.hasOwnership()) {
-                        queue.push({
-                            tree: child,
-                            parentEntry: currentEntry,
-                        });
-                    }
-                });
+        if (currentEntry.hasVaryOwnership()) {
+            // we are sure there will be more then one file
+            let treeToUnwrap = tree;
+            while (treeToUnwrap.children.length === 1) {
+                // skip single directories
+                treeToUnwrap = treeToUnwrap.children[0];
             }
-        }
-    } catch (e) {
-        if (e !== 'finish') {
-            throw e;
+            treeToUnwrap.children.forEach((child) => {
+                if (child.hasOwnership()) {
+                    queue.push({
+                        tree: child,
+                        parentEntry: currentEntry,
+                    });
+                }
+            });
         }
     }
 
     progress.terminate();
 
     const newCodeowners = entries
-        .sort((a, b) => (a.tree.path < b.tree.path ? -1 : 1))
+        .sort((a, b) => (a.printPath < b.printPath ? -1 : 1))
         .map((entry) => entry.toString(Boolean(process.env.DEBUG)))
         .join('');
 

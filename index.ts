@@ -29,6 +29,12 @@ yargs(process.argv.slice(2))
                     default: 0.5,
                     type: 'number',
                 })
+                .option('useGlobs', {
+                    alias: 'g',
+                    describe: 'makes ureadable but extremely compressed output',
+                    default: false,
+                    type: 'boolean',
+                })
                 .option('budget', {
                     alias: 'b',
                     describe: 'max CODEOWNERS size',
@@ -43,6 +49,7 @@ yargs(process.argv.slice(2))
                 lossy1: argv.lossy1,
                 lossy2: argv.lossy2,
                 budget: argv.budget,
+                useGlobs: argv.useGlobs,
             });
         }
     )
