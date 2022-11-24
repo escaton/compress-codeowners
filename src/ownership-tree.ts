@@ -3,24 +3,32 @@ import fs from 'fs/promises';
 import path from 'path';
 import globToTree, { ITree } from 'glob-tree-list';
 import ProgressBar from 'progress';
-
-import {
-    parse as parseCodeowners,
-    find as findInCodeowners,
-} from '../../client/scripts/lint-codeowners';
+import { StaticPool } from 'node-worker-threads-pool';
+import os from 'os';
 
 export class OwnershipTree {
     size: number = 1;
     children: OwnershipTree[] = [];
     ownership: Map<string, [filesOwned: number, key: string]> = new Map();
-    constructor(public path: string) {}
-    addChild(name: string) {
-        const child = new OwnershipTree(this.path + name);
+    isFile: boolean = false;
+    maxOwnership:
+        | [team: string, value: [count: number, key: string]]
+        | undefined;
+    constructor(public path: string, public name: string) {}
+    addChild(name: string, isFile: boolean) {
+        if (!isFile) {
+            name = name.replace(/\/$/, '');
+        }
+        const childPath =
+            this.path === '/' ? this.path + name : this.path + '/' + name;
+        const child = new OwnershipTree(childPath, name);
+        child.isFile = isFile;
         this.children.push(child);
+        this.children.sort((a, b) => b.path.length - a.path.length);
         return child;
     }
-    setOwnership(owners: { [key: string]: any }) {
-        const teams = Object.keys(owners).map(
+    setOwnership(owners: string[]) {
+        const teams = owners.map(
             (team) =>
                 [team.replace(/(@@|@|#)/, ''), [1, this.path]] as [
                     string,
@@ -32,15 +40,19 @@ export class OwnershipTree {
         );
     }
     hasOwnership() {
-        return !(
-            this.ownership.size === 1 &&
-            this.ownership.has('none')
-        );
+        return !(this.ownership.size === 1 && this.ownership.has('none'));
     }
     calcOwnership() {
-        this.size = this.children.reduce((acc, child) => (acc += child.size), 0);
+        this.size = this.children.reduce(
+            (acc, child) => (acc += child.size),
+            0
+        );
+        this.maxOwnership = Array.from(this.ownership)
+            .filter(([team]) => team !== 'none')
+            .sort(([, [a]], [, [b]]) => a - b)
+            .pop();
         this.children.forEach((child) => {
-            for (let [team, [count, key]] of child.ownership) {
+            for (const [team, [count, key]] of child.ownership) {
                 const [prevCount, prevKey] = this.ownership.get(team) || [
                     0,
                     '',
@@ -73,14 +85,19 @@ export class OwnershipTree {
         return {
             size: this.size,
             path: this.path,
+            name: this.name,
             ownership: Array.from(this.ownership.entries()),
+            maxOwnership: this.maxOwnership,
+            isFile: this.isFile,
             children: this.children.map((child) => child.toJSON()),
         };
     }
     static fromJSON(treeData: OwnershipTree) {
-        const tree = new OwnershipTree(treeData.path);
+        const tree = new OwnershipTree(treeData.path, treeData.name);
         tree.size = treeData.size;
         tree.ownership = new Map(treeData.ownership);
+        tree.maxOwnership = treeData.maxOwnership;
+        tree.isFile = treeData.isFile;
         tree.children = treeData.children.map((childData) => {
             return OwnershipTree.fromJSON(childData);
         });
@@ -94,7 +111,7 @@ export const getOwnershipTree = async (
     cache: boolean
 ): Promise<OwnershipTree> => {
     const cacheKey = crc32(
-        files.sort().join('') + codeownersString + 'version5'
+        files.sort().join('') + codeownersString + 'version 11'
     ).toString(16);
     const fileName = path.resolve(
         __dirname,
@@ -114,40 +131,54 @@ export const getOwnershipTree = async (
             throw e;
         }
     } catch {
-        const codeowners = parseCodeowners(codeownersString);
-
         console.log('Matching files ownership...');
 
-        const progressBar = new ProgressBar('[:bar] :file', {
-            total: files.length - 1,
-            width: 80,
-            complete: '█',
-            incomplete: '_',
-            clear: true,
+        const filesOwners: Record<string, string[]> = {}
+
+        const workersCount = os.cpus().length - 1;
+        const staticPool = new StaticPool({
+            size: workersCount,
+            task: __dirname + '/ownership-tree-worker-boot.js',
+            workerData: { codeownersString },
         });
 
+        const chunkSize = Math.ceil(files.length / workersCount);
+        await Promise.all(
+            Array(os.cpus().length - 1)
+                .fill(0)
+                .map((_, index) => {
+                    const chunk = files.slice(
+                        index * chunkSize,
+                        index * chunkSize + chunkSize
+                    );
+                    return staticPool.exec(chunk).then((owned: Record<string, string[]>) => {
+                        Object.assign(filesOwners, owned)
+                    });
+                })
+        );
+
         const buildOwnershipTree = (globTree: ITree, tree: OwnershipTree) => {
-            Object.keys(globTree).forEach((leaf) => {
-                if (
-                    typeof globTree[leaf] === 'object' &&
-                    globTree[leaf] !== null
-                ) {
-                    const folderNode = tree.addChild(leaf);
-                    buildOwnershipTree(globTree[leaf] as ITree, folderNode);
-                    folderNode.calcOwnership();
-                }
-                if (typeof globTree[leaf] === 'string') {
-                    const fileNode = tree.addChild(leaf);
-                    codeowners.files = [fileNode.path];
-                    const { owners } = findInCodeowners(codeowners);
-                    fileNode.setOwnership(owners);
-                    progressBar.tick({ file: leaf });
-                }
-            });
+            return Promise.all(
+                Object.keys(globTree).map((leaf) => {
+                    if (
+                        typeof globTree[leaf] === 'object' &&
+                        globTree[leaf] !== null
+                    ) {
+                        const folderNode = tree.addChild(leaf, false);
+                        buildOwnershipTree(globTree[leaf] as ITree, folderNode);
+                        folderNode.calcOwnership();
+                    }
+                    if (typeof globTree[leaf] === 'string') {
+                        const fileNode = tree.addChild(leaf, true);
+                        fileNode.setOwnership(filesOwners[fileNode.path] || [])
+                    }
+                })
+            );
         };
 
-        const root = new OwnershipTree('/');
-        buildOwnershipTree(globToTree(files), root);
+        const root = new OwnershipTree('/', '/');
+        await buildOwnershipTree(globToTree(files), root);
+        staticPool.destroy();
         root.calcOwnership();
 
         console.log('Ownership matched');
