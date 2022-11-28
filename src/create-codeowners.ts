@@ -206,7 +206,7 @@ class Entry {
             result = [
                 `path:`,
                 this.printPath,
-                this.tree.isFile ? '' : '/**/*',
+                this.tree.isFile ? '' : '/**',
                 ' ',
                 teams.join(' '),
                 '\n',
