@@ -29,8 +29,11 @@ class CodePath {
         let [pattern, ...responsible] = value.split(' ');
 
         // Remove any trailing "**/*" from pattern.
-        if (pattern.endsWith('**/*') && !pattern.slice(0,-4).includes('*')) {
-            pattern = pattern.substr(0, pattern.length - 4);
+        // if (pattern.endsWith('**/*') && !pattern.slice(0,-4).includes('*')) {
+        //     pattern = pattern.substr(0, pattern.length - 4);
+        // }
+        if (pattern.endsWith('*')) {
+            pattern = pattern + '*'
         }
         this.pattern = pattern;
 

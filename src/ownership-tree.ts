@@ -111,7 +111,7 @@ export const getOwnershipTree = async (
     cache: boolean
 ): Promise<OwnershipTree> => {
     const cacheKey = crc32(
-        files.sort().join('') + codeownersString + 'version 11'
+        files.sort().join('') + codeownersString + 'version 12'
     ).toString(16);
     const fileName = path.resolve(
         os.tmpdir(),
